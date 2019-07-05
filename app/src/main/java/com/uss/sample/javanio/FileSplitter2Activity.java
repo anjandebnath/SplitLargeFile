@@ -27,6 +27,12 @@ import java.io.RandomAccessFile;
 import java.util.ArrayList;
 import java.util.List;
 
+import io.reactivex.Observable;
+import io.reactivex.Scheduler;
+import io.reactivex.Single;
+import io.reactivex.android.schedulers.AndroidSchedulers;
+import io.reactivex.schedulers.Schedulers;
+
 
 /**
  * I didn't load the entire file - a small part is just saved in a buffer,
@@ -65,37 +71,22 @@ public class FileSplitter2Activity extends AppCompatActivity {
                 ).withListener(new MultiplePermissionsListener() {
             @Override public void onPermissionsChecked(MultiplePermissionsReport report) {
 
+                // Split the file into subfiles
+                Single<String> pathList = getSplitFile();
+
+
+                // after getting the split option ok then we will merge the file
+                // this is actually the case of Making 2 requests where the second depends on the first
+                Single<String> dummies = pathList.flatMap(s -> {
+                       return joinSubFile(5);
+                });
+
+                dummies.subscribeOn(Schedulers.io())
+                        .observeOn(AndroidSchedulers.mainThread())
+                        .subscribe(s -> Toast.makeText(getApplicationContext(), "Merge Done!", Toast.LENGTH_LONG).show());
 
 
 
-
-                // read the file from sd card and split
-
-                /*String filePath = Environment.getExternalStorageDirectory().getAbsolutePath() +
-                        File.separator + "DCIM/Camera/IMG_07.jpg";
-
-                try {
-                    List path = split(filePath, 1);
-                    for (int i= 0; i<path.size(); i++){
-                        System.out.println("Splitted into:"+ path.get(i));
-                    }
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }*/
-
-
-                // read the files from sdcard and join
-                // here after getting the split files number we need to set the value
-                File[] files = new File[5];
-                for (int i = 1; i <= 5; i++) {
-                    files[i-1] = new File(dir + "part" + (i-1) + suffix);
-                }
-
-                try {
-                    joinFiles(files);
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
 
             }
             @Override public void onPermissionRationaleShouldBeShown(List<PermissionRequest> permissions, PermissionToken token) {
@@ -104,21 +95,76 @@ public class FileSplitter2Activity extends AppCompatActivity {
         }).check();
     }
 
+    //  RxJava 2 Observable from a Java List:
+    public Single<String> getSplitFile(){
 
-    /**
-     *
-     * @param fileName name of file to be split.
-     * @param mBperSplit number of MB per file.
-     * @return Return a list of files.
-     * @throws IOException
-     */
-    public List split(String fileName, int mBperSplit) throws IOException {
+        String filePath = Environment.getExternalStorageDirectory().getAbsolutePath() +
+                File.separator + "DCIM/Camera/IMG_07.jpg";
+        List<String> path = null;
+        try {
+            path = split(filePath, 1);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        return Single.just("Hello");
+
+    }
+
+
+    public Single<String> getDummyData(){
+        return Single.just("Dum 1");
+    }
+
+    public Single<String> joinSubFile(int totalNumOfSplits){
+
+        File[] files = new File[totalNumOfSplits];
+        for (int i = 1; i <= totalNumOfSplits; i++) {
+            files[i-1] = new File(dir + "part" + (i-1) + suffix);
+        }
+
+        try {
+            joinFiles(files);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return Single.just("Merging done");
+    }
+
+
+
+    public void joinFiles(File[] files) throws Exception {
+        int maxReadBufferSize = 8 * 1024;
+
+        BufferedOutputStream bw = new BufferedOutputStream(new FileOutputStream(dir + "FullJoin"
+                + ".jpg"));
+
+        RandomAccessFile raf = null;
+
+        for (File file : files) {
+            raf = new RandomAccessFile(file, "r");
+            long numReads = raf.length() / maxReadBufferSize;
+            long numRemainingRead = raf.length() % maxReadBufferSize;
+            for (int i = 0; i < numReads; i++) {
+                readWrite(raf, bw, maxReadBufferSize);
+            }
+            if (numRemainingRead > 0) {
+                readWrite(raf, bw, numRemainingRead);
+            }
+            raf.close();
+
+        }
+        bw.close();
+    }
+
+
+    public List<String> split(String fileName, int mBperSplit) throws IOException {
 
         if (mBperSplit <= 0) {
             throw new IllegalArgumentException("mBperSplit must be more than zero");
         }
 
-        List partFiles = new ArrayList();
+        List<String> partFiles = new ArrayList<>();
         final long sourceSize = new File(fileName).length();
         int bytesPerSplit = 1024 * 1024 * mBperSplit;
         long numSplits = sourceSize / bytesPerSplit;
@@ -155,7 +201,7 @@ public class FileSplitter2Activity extends AppCompatActivity {
         return partFiles;
     }
 
-    private static BufferedOutputStream newWriteBuffer(int partNum, List partFiles) throws IOException{
+    private static BufferedOutputStream newWriteBuffer(int partNum, List<String> partFiles) throws IOException{
 
         File mDirectory = new File(dir);
         if (! mDirectory.exists()){
@@ -175,58 +221,8 @@ public class FileSplitter2Activity extends AppCompatActivity {
     }
 
 
-    public void joinFiles(File[] files) throws Exception {
-        int maxReadBufferSize = 8 * 1024;
 
-        BufferedOutputStream bw = new BufferedOutputStream(new FileOutputStream(dir + "FullJoin"
-                + ".jpg"));
 
-        RandomAccessFile raf = null;
 
-        for (File file : files) {
-            raf = new RandomAccessFile(file, "r");
-            long numReads = raf.length() / maxReadBufferSize;
-            long numRemainingRead = raf.length() % maxReadBufferSize;
-            for (int i = 0; i < numReads; i++) {
-                readWrite(raf, bw, maxReadBufferSize);
-            }
-            if (numRemainingRead > 0) {
-                readWrite(raf, bw, numRemainingRead);
-            }
-            raf.close();
-
-        }
-        bw.close();
-    }
-
-    public void join(String FilePath) {
-        long leninfile = 0, leng = 0;
-        int count = 1, data = 0;
-        try {
-            File filename = new File(FilePath);
-
-            OutputStream outfile = new BufferedOutputStream(new FileOutputStream(filename));
-            while (true) {
-                filename = new File(FilePath + count + ".sp");
-                if (filename.exists()) {
-
-                    InputStream infile = new BufferedInputStream(new FileInputStream(filename));
-                    data = infile.read();
-                    while (data != -1) {
-                        outfile.write(data);
-                        data = infile.read();
-                    }
-                    leng++;
-                    infile.close();
-                    count++;
-                } else {
-                    break;
-                }
-            }
-            outfile.close();
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
 
 }
