@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">JavaNio</string>
+    <string name="title_activity_file_splitter1">FileSplitter1Activity</string>
+</resources>
